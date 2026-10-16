@@ -1,7 +1,62 @@
 # Agent Instructions
 This file provides instructions and context for AI coding agents working on this project.
 
-Filenames: don't shout, Readme.md over README.md
+Sections between `BEGIN`/`END` markers below are auto-generated and may be
+rewritten by their tooling; everything above them is human-owned. The table of
+contents is hand-maintained.
+
+## Table of Contents
+- [Project Overview](#project-overview)
+- [Build & Test](#build--test)
+- [Conventions](#conventions)
+- [Non-Interactive Shell Commands](#non-interactive-shell-commands)
+- [Swamp Rules & Skills](#project)
+- [Issue Tracking (Beads)](#beads-issue-tracker)
+
+## Project Overview
+Prototype integration of the Pi coding agent with Kilo's shared project/session
+experience, so a user can move between Pi, Kilo CLI, and Kilo Cloud without
+losing continuity of their work. See `Plan.md` for the full brief.
+
+Key repositories: Kilo Code, Kilo Cloud, and the Kilo Pi provider (Kilo-Org);
+the Pi monorepo (badlogic/pi-mono); and the Agent Client Protocol (ACP).
+
+## Build & Test
+No build or test tooling is defined in this repository yet — it is a
+swamp-managed configuration repo with no `package.json` or `deno.json`. Use
+`swamp --help` for CLI commands.
+
+## Conventions
+- Filenames: don't shout — prefer `Readme.md` over `README.md`.
+- Track all work in Beads; do not use markdown TODO lists.
+- Beads skill: `.agents/skills/beads/SKILL.md` (project) or
+  `~/.agents/skills/beads/SKILL.md` (global).
+- Run `bd prime` for the full Beads operational command set.
+- "Workflow" in this repository means a swamp workflow (see rule 9 below). For
+  Beads/task tracking sessions, say "task" or "session".
+
+## Non-Interactive Shell Commands
+**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
+
+Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
+
+**Use these forms instead:**
+```bash
+# Force overwrite without prompting
+cp -f source dest           # NOT: cp source dest
+mv -f source dest           # NOT: mv source dest
+rm -f file                  # NOT: rm file
+
+# For recursive operations
+rm -rf directory            # NOT: rm -r directory
+cp -rf source dest          # NOT: cp -r source dest
+```
+
+**Other commands that may prompt:**
+- `scp` - use `-o BatchMode=yes` for non-interactive
+- `ssh` - use `-o BatchMode=yes` to fail instead of prompting
+- `apt-get` - use `-y` flag
+- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
 <!-- BEGIN swamp managed section - DO NOT EDIT -->
 # Project
@@ -56,60 +111,10 @@ Behaviors (formerly models) are managed with `swamp behavior` — e.g.
 directly). Every `swamp model …` spelling remains supported.
 <!-- END swamp managed section -->
 
-
-## Task and Issue Tracking
-
-This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
-
-> **Architecture in one line:** Issues live in a local Dolt database
-> (`.beads/dolt/`); cross-machine sync uses `bd dolt push/pull` (a
-> git-compatible protocol), stored under `refs/dolt/data` on your git
-> remote — separate from `refs/heads/*` where your code lives.
-> `.beads/issues.jsonl` is a passive export, not the wire protocol.
->
-> See [sync-concepts](https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md)
-> for the one-screen overview and anti-patterns (don't treat JSONL as the
-> source of truth; don't `bd import` during normal operation; don't
-> reach for third-party Dolt hosting before trying the default).
-
-## Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
-```
-
-## Non-Interactive Shell Commands
-
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
-
-Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
-
-**Use these forms instead:**
-```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
-
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
-```
-
-**Other commands that may prompt:**
-- `scp` - use `-o BatchMode=yes` for non-interactive
-- `ssh` - use `-o BatchMode=yes` to fail instead of prompting
-- `apt-get` - use `-y` flag
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
-
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context and commands.
 
 ### Quick Reference
 
@@ -138,7 +143,7 @@ The managed Beads block is task-tracking guidance, not permission to override re
 
 ## Session Completion
 
-This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
+This protocol applies when ending a Beads implementation session. It is subordinate to explicit user, repository, or orchestrator instructions.
 
 1. **File issues for remaining work** - Create beads for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
@@ -161,27 +166,3 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
-
-<!-- BEGIN BEADS CODEX SETUP: generated by bd setup codex -->
-## Beads Issue Tracker
-
-Use Beads (`bd`) for durable task tracking in repositories that include it. Use the `beads` skill at `.agents/skills/beads/SKILL.md` (project install) or `~/.agents/skills/beads/SKILL.md` (global install) for Beads workflow guidance, then use the `bd` CLI for issue operations.
-
-### Quick Reference
-
-```bash
-bd ready                # Find available work
-bd show <id>            # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>           # Complete work
-bd prime                # Refresh Beads context
-```
-
-### Rules
-
-- Use `bd` for all task tracking; do not create markdown TODO lists.
-- Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
-- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
-<!-- END BEADS CODEX SETUP -->
