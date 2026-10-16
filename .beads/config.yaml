@@ -73,3 +73,7 @@
 
 sync:
     remote: "git+https://github.com/maphew/pi-kilo.git"
+agent:
+    profile: team-maintainer
+
+no-git-ops: false
