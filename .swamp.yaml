@@ -5,3 +5,6 @@ tools:
   - claude
 defaultVault: default
 gitignoreManaged: true
+trustedCollectives:
+  - swamp
+  - maphew
