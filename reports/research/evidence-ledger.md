@@ -61,3 +61,38 @@ Labels: **Verified fact** · **Observed behavior** · **Source claim** ·
 - Artifact: reports/research/2026-10-16-workstream-a-kilo-local.md#q7 @ 1552877e82ceaecc79a9fd4be7859518745e6f56
 - Evidence: RemoteProtocol.SessionInfo/InstanceAdvertisement extension precedent (optional fields); AttachedState presence model; needs Workstream B relay-opacity answer
 - Status: open
+
+### 2026-10-17 — Pi RPC mode is the adapter boundary: long-lived JSONL in/out
+- Label: Verified fact
+- Bead: pi-kilo-hyj.3
+- Artifact: reports/research/2026-10-16-workstream-c-pi-runtime.md#q1
+- Evidence: docs/cli-integration.md, docs/rpc.md (pi-coding-agent 1.3.0, MIT); reproduced against installed pi 1.3.0
+- Status: confirmed
+
+### 2026-10-17 — Pi accepts a caller-supplied session id and resumes it cross-process
+- Label: Observed behavior
+- Bead: pi-kilo-hyj.3
+- Artifact: reports/research/2026-10-16-workstream-c-pi-runtime.md#c2
+- Evidence: `pi --mode rpc --session-dir <scratch> --session-id expc2` → get_state sessionId=expc2, sessionFile=..._expc2.jsonl; new process with --session <file> restored 5 messages; get_entries since=<leafId> returned exactly 2 new entries
+- Status: confirmed
+
+### 2026-10-17 — Pi tool approvals surface to an external client and are enforced by Pi
+- Label: Observed behavior
+- Bead: pi-kilo-hyj.3
+- Artifact: reports/research/2026-10-16-workstream-c-pi-runtime.md#c3
+- Evidence: extension tool_call + ctx.ui.confirm → RPC extension_ui_request(confirm); response confirmed=false → tool_execution_end isError=true "read blocked by policy extension"; confirmed=true → tool executed. docs/security.md: Pi has no built-in per-tool approval. docs/rpc-extension-ui.md defines the subprotocol.
+- Status: confirmed
+
+### 2026-10-17 — History fidelity is high but not provider-complete
+- Label: Inference
+- Bead: pi-kilo-hyj.3
+- Artifact: reports/research/2026-10-16-workstream-c-pi-runtime.md#q2
+- Evidence: docs/message-types.md — thinkingSignature/textSignature/thoughtSignature are opaque provider metadata; provider_stream_event is notification-only and not persisted. What would verify: attempt replay of a Pi assistant message with opaque signatures into another provider.
+- Status: open
+
+### 2026-10-17 — adapter must branch on prompt disposition before awaiting settle
+- Label: Inference
+- Bead: pi-kilo-hyj.3
+- Artifact: reports/research/2026-10-16-workstream-c-pi-runtime.md#q2
+- Evidence: docs/rpc.md — disposition "handled" means no run started, so do not wait for agent_settled; "agent_end" is not completion (retries/compaction may follow). What would verify: exercise an extension-command prompt and an auto-retry prompt over RPC.
+- Status: open
