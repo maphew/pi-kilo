@@ -5,9 +5,9 @@
 - **Status:** complete — decision document. Phase 0 only; no implementation, no
   upstream PR, no branch publish, no git push, no production writes.
 - **Verdict:** **CONDITIONAL NO-GO** on "small adapter, no Kilo changes"; **GO**
-  for a bounded, explicitly labelled local Phase-1 harness gated on an
-  execution-owner lease with a runtime-kind guard and on message-id dedupe
-  engaged at the send path.
+  for a bounded, explicitly labelled local Phase-1 harness gated on a
+  single-owner lease with fencing token on the relay (holder identified by
+  runtime kind) and on message-id dedupe engaged at the send path.
 
 ### Inputs and revisions read
 
@@ -215,7 +215,7 @@ extension concern enforced inside Pi; closing RPC stdin requests orderly
 shutdown (**Verified fact / Observed behavior**, C Q1–Q5, C1–C3).
 
 **Concrete verified relay facts (line-exact at the pinned SHAs; review F PASS).**
-(1) Ownership is last-heartbeat-wins with no runtime-kind guard:
+(1) Ownership is last-heartbeat-wins with no single-live-owner invariant (Kilo-wide gap, not Pi-specific):
 `sessionOwners = new Map<string,string>()` (`UserConnectionDO.ts:335`);
 `handleHeartbeat` moves ownership when `previousOwner !== connectionId`, failing
 the old owner's pending commands and then unconditionally setting the new owner
@@ -244,7 +244,7 @@ Legend: ✅ supported; ◐ partial / host work required; ❌ absent.
 
 | Candidate | What it is | Live bidi vs history | Identity / order / replay / continuation | Perms / tools / errors / streaming | Ownership / reconnect | Incremental | License / maturity |
 |---|---|---|---|---|---|---|---|
-| **Kilo Remote Connections** | Product convention (WS + Zod; `remote-protocol.ts`) | ✅ live (`command`→runtime, `event`←runtime) | ◐ `ses_` ids, subscribe, heartbeat; replay/dedup partial; cross-runtime continuation unproven | ◐ opaque `data`; tool/perm encoding is Kilo's own | ◐ CLI `attached-state.ts` fences real; **relay `sessionOwners` last-heartbeat-wins, no kind guard** | ◐ (correction to D: ◐, not ✅, until A's seam resolves) | MIT; shipping |
+| **Kilo Remote Connections** | Product convention (WS + Zod; `remote-protocol.ts`) | ✅ live (`command`→runtime, `event`←runtime) | ◐ `ses_` ids, subscribe, heartbeat; replay/dedup partial; cross-runtime continuation unproven | ◐ opaque `data`; tool/perm encoding is Kilo's own | ◐ CLI `attached-state.ts` fences real; **relay `sessionOwners` last-heartbeat-wins, no single-live-owner invariant (any two connections collide)** | ◐ (correction to D: ◐, not ✅, until A's seam resolves) | MIT; shipping |
 | **ACP** | Spec + many impls + registry | ✅ (`session/prompt`,`cancel`,`request_permission`) | ◐ agent-owned `SessionId`; `load`/`resume` same-agent only; ❌ shared identity, ❌ cross-runtime continuation | ✅ tools/diffs/usage/streaming; `Other`/`_meta` passthrough is **v2** (v1 has none) | ❌ no owner lease/dedup | ✅ sidecar | Apache-2.0; v1 stable, v2 Draft, active |
 | **Pi RPC / SDK** | Working impl (JSONL stdio / in-process) | ✅ prompt/steer/follow_up/abort + events | ◐ native session tree; `get_entries(since)` durable cursor; continuation within Pi only | ✅ `tool_execution_*` partials/errors; permission bridge | ❌ no owner lease; process-scoped | ✅ read-only; no core change | MIT; active |
 | **ASP / USL** | Draft spec (TS) + reference impl (Rust) | ❌ explicitly not live control | ✅ content-addressed ids, append log, lineage `handoff`, idempotent replay; cross-harness Pi converter | ◐ models tool/thinking/approval/unknown; no live perms | ◐ single-writer; no live owner | ◐ import/export library | MIT; draft 3★ / "validation" 55★ |
@@ -300,10 +300,12 @@ not state migration**; **active-turn migration is out of scope**.
 (1) widen the runtime label — `instance.kind` (closed `cli|remote`) or an
 equivalent **runtime-kind/owner field** so Pi is representable honestly, and
 render it; (2) stop equating "not live in heartbeat" with "not in the list" so
-an offline external owner keeps its session row; (3) add a **runtime-kind guard
-plus an owner lease/fencing token** on the relay ownership path
+an offline external owner keeps its session row; (3) add a **single-owner lease with fencing token** on the relay ownership path
 (`sessionOwners`/`handleHeartbeat`) so a second claimant for one logical session
-is **rejected**, not silently installed; (4) add a `forward_message` command (or
+is **rejected**, not silently installed — a Kilo-wide gap (any two connections
+claiming one id collide today); the lease record carries the holder's **runtime
+kind** so the owner is identifiable, and Pi hits it by construction because the
+adapter supplies `--session-id`; (4) add a `forward_message` command (or
 an `external:true` branch) to the **relay allowlist**
 (`ALLOWED_VIEWER_COMMANDS`, `UserConnectionDO.ts:133`) and a forward-or-execute
 branch beside `send_message` in `remote-sender.ts`; and engage a **mandatory
@@ -323,8 +325,8 @@ via the extension. No Pi core edits.
 history, real continuation, explicit ownership, no duplicate side effects, and
 native, local-first runtimes, with a small adapter and a narrowly scoped Kilo
 extension. Both runtimes already have mature session/event models and the same
-partial-vs-complete discipline. Two blockers are **verified**: ownership without
-a runtime-kind guard (`UserConnectionDO.ts:335, 711–732, 2431–2432`) and missing
+partial-vs-complete discipline. Two blockers are **verified**: no single-live-owner invariant on the relay
+(`UserConnectionDO.ts:335, 711–732, 2431–2432`) and missing
 `mutationId`/message-id dedupe on the send paths (`cli-live-transport.ts:1041,
 1087`; `UserConnectionDO.ts:1633`; `remote-sender.ts:1280–1324`). Correction to
 E: E's ownership rules and `msg_` idempotency are **specified, not proven**, and
@@ -363,7 +365,7 @@ caveat) — the mechanisms are named, not demonstrated.
 | # | New concept | Why genuinely needed | Minimal shape | Idempotency / ordering rule | Owner |
 |---|---|---|---|---|---|
 | 1 | External-runtime registration / runtime kind | `instance.kind` is `cli|remote`; no third-party kind exists (F1, B Q1) | Optional `runtime: {kind:"pi", instanceId}` on the heartbeat/instance and a `runtimeKind` the UI reads | N/A (advertisement) | Kilo relay schema + adapter |
-| 2 | Execution-owner lease + fencing token (runtime-kind aware) | Relay ownership is last-heartbeat-wins with no kind guard (F4) | `{sessionId, ownerRuntimeKind, ownerToken, leaseExpiry}`; second claimant for a live lease → reject | Reject on conflict; owner changes only at turn boundaries | Kilo relay (`UserConnectionDO`) |
+| 2 | Single-owner lease + fencing token (holder identified by runtime kind) | Relay has no single-live-owner invariant — any two connections claiming one id collide (F4); Kilo CLI ids rarely collide by chance (timestamp+random), Pi hits it by construction via supplied `--session-id` | `{sessionId, ownerRuntimeKind, ownerToken, leaseExpiry}`; second claimant for a live lease → reject | Reject on conflict; owner changes only at turn boundaries | Kilo relay (`UserConnectionDO`) |
 | 3 | Turn-boundary handoff semantics | No wire concept of a transferable owner beyond presence, and no accepted-vs-complete distinction at transfer (A Q3/Q7, D §5.3) | `ownerToken` grant/revoke + handoff record; `accepted` (Pi `disposition`/relay ack) vs `turn-complete` (`agent_settled`) | Transfer only when idle; never mid-turn | Adapter + Kilo |
 | 4 | Pi-event fidelity / unknown-payload convention | Kilo's durable event union is closed; Pi emits provider-specific blobs (E §3.3) | Namespaced `metadata["pi.payload"]` on the nearest durable event, verbatim | Carry verbatim; never re-interpret | Adapter |
 | 5 | Pi-native ↔ logical session binding record | No runtime-agnostic logical↔runtime mapping exists (F2) | `{sessionID, runtimeKind, piSessionID, piSessionFile, cwd, capabilities, updatedAt}` | Keyed by `sessionID` + `piSessionID` | Adapter (storage home TBD, review E gap 3) |
@@ -395,7 +397,7 @@ open), title/rename durable event, `queue_update`, and the `turn_end`-vs-
 | 1 | Shared logical identity | **Partial** | Kilo `ses_` canonical; Pi accepts caller-supplied id (C2). Gap: no runtime-agnostic mapping; `ses_` collision (F2) | Pi accepts `--session-id ses_test01` verbatim **and** binding record round-trips |
 | 2 | Shared history | **Partial** | `SessionIngestDO` ingest is item-id idempotent; Pi `get_entries(since)` cursor. Gap: relay event envelope has no `seq`; `catch_up` schema-only; deltas lost mid-turn (F5) | Drop socket mid-tool; reconcile from ingest item ids + Pi cursor with no lost finalized event |
 | 3 | Real continuation | **Partial** | Pi executes via RPC; but Kilo must route to the owner, not its local loop (E §4.3). Gap: ownership routing unproven | Prompt to a Pi-owned session reaches Pi only, never a Kilo loop |
-| 4 | Explicit execution ownership | **Not satisfied (today)** | `sessionOwners` last-heartbeat-wins; no runtime-kind guard; routing = whoever owns it (F4) | Second claimant for one live lease is **rejected**; owner stable |
+| 4 | Explicit execution ownership | **Not satisfied (today)** | `sessionOwners` last-heartbeat-wins; no single-live-owner invariant (Kilo-wide: any two connections collide); routing = whoever owns it (F4) | Second claimant for one live lease is **rejected**; owner stable |
 | 5 | No duplicate side effects | **Not satisfied (today)** | Chat sends omit `mutationId`; relay dedupe gated on it; `send_message`→`prompt()` unconditional (F3) | Retried identical `messageID` executes once (F experiment step 2) |
 | 6 | Native runtime preservation | **Satisfied** | RPC + extension, no Pi core change (C Q6); permissions enforced in Pi (C3) | — |
 | 7 | Local-first operation | **Satisfied** | Pi is a separate process; Kilo loss does not stop Pi (C Q5). Caveat: adapter death closes stdin → orderly Pi shutdown, session file survives | Adapter dies mid-turn; Pi session resumable from file |
@@ -418,9 +420,9 @@ local Phase-1 harness whose exit gate is ownership + dedupe behaviour.
 
 **GO conditions (all must hold before Phase 1 is presented as shared identity or
 cloud support):**
-1. An **execution-owner lease with a runtime-kind guard** exists (or is stubbed
+1. A **single-owner lease with fencing token** exists on the relay (or is stubbed
    in the harness) such that a second claimant for one logical session is
-   **rejected** and the owner is stable.
+   **rejected** and the owner — identified by runtime kind — is stable.
 2. **Message-id dedupe is engaged** on the send path — a mandatory stable
    `mutationId`/`messageID`, with a retried identical message executing **once**.
 3. **Catch-up on reconnect** uses Pi's durable `get_entries(since=<last id>)`
@@ -444,9 +446,9 @@ cloud support):**
 **Minimum viable architecture.** Kilo `ses_` row in `cli_sessions_v2` +
 `SessionIngestDO` transcript as shared truth; a Pi adapter process spawned as
 `pi --mode rpc --session-id <ses_…>` projecting native events into Kilo ingest
-shapes with unknown payloads in `metadata`; a runtime-kind-aware, leased owner
-record so Kilo routes `send_message` to the owner (Pi) and never executes it
-locally; Pi local-first with a durable `get_entries` cursor for reconnect
+shapes with unknown payloads in `metadata`; a single-owner lease record
+(holder identified by runtime kind) so Kilo routes `send_message` to the owner (Pi)
+and never executes it locally; Pi local-first with a durable `get_entries` cursor for reconnect
 reconciliation. This is the smallest shape that can satisfy invariants 1–7.
 
 **Realistic prototype boundary.** Because the relay is a private, JWT-authenticated
@@ -469,8 +471,9 @@ relay allowlist can be extended; real UI rendering of an external runtime; real
 prod ownership semantics; the entire Cloud Agent path.
 
 **Unresolved risks (numbered; each with the experiment that retires it):**
-1. **Ownership fencing** — relay last-heartbeat-wins, no runtime-kind guard.
-   *Retire:* F step 3 (second claimant rejected, owner stable).
+1. **Ownership fencing** — relay last-heartbeat-wins, no single-live-owner
+   invariant (Kilo-wide gap; Pi hits it by construction). *Retire:* F step 3
+   (second claimant rejected, owner stable).
 2. **Duplicate execution on retry** — chat sends omit `mutationId`.
    *Retire:* F step 2 (retried identical `messageID` executes once).
 3. **Identity collision / mapping** — Pi UUID vs strict `ses_`; no
@@ -513,9 +516,9 @@ prod ownership semantics; the entire Cloud Agent path.
 **What Phase 1 must build:** the F harness (two owners, one retry, reconnect,
 permission-deny); the Pi RPC adapter skeleton with strict LF framing and
 `--session-id` binding; the Pi event → Kilo ingest mapping with golden fixtures;
-the permission bridge extension; the owner-lease + runtime-kind guard (in the
-harness first); and the message-id dedupe regression test **written before the
-adapter** so it can fail.
+the permission bridge extension; the single-owner lease (holder identified by
+runtime kind, in the harness first); and the message-id dedupe regression test
+**written before the adapter** so it can fail.
 
 **External action:** nothing has been published upstream; no branch was pushed,
 no PR opened, no production write made. Any external change (upstream proposal,
