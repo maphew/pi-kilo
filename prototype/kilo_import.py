@@ -7,7 +7,8 @@ optionally execs `pi --session <file>` so the conversation continues with Pi's
 own tools, permissions, and model.
 
 Usage:
-  python3 prototype/kilo_import.py ses_eb5d...                      # import + exec pi
+  pi-kilo ses_eb5d...                                           # installed CLI
+  python3 prototype/kilo_import.py ses_eb5...                      # import + exec pi
   python3 prototype/kilo_import.py --session ses_eb5... --cloud-fork
   python3 prototype/kilo_import.py ses_eb5... --cwd ~/dev/x -- --model kilo/x
   python3 prototype/kilo_import.py ses_eb5... --import-only --out /tmp/x.jsonl
@@ -20,6 +21,10 @@ Auth:
 Honest boundaries:
   - One-way history import at a point in time, not live integration. The Pi
     session has its own identity; Kilo does not see its new turns.
+  - Linked Kilo branches resolve to the newest path; alternatives are dropped
+    and reported. Classic root-user-turn exports are imported in full.
+  - Kilo compaction summaries become Pi compaction entries with the retained
+    tail mapped from tail_start_id.
   - Kilo's runtime state (pending permissions, provider metadata, snapshots,
     patches, private reasoning signatures) is not migrated beyond history text,
     tool calls, and tool results.
@@ -166,6 +171,163 @@ def _stop_reason(info: dict, content: list[dict]) -> str:
     }.get(finish or "stop", "stop")
 
 
+def _info(message: dict) -> dict:
+    return message.get("info") or {}
+
+
+def _message_id(message: dict) -> str:
+    return _info(message).get("id") or ""
+
+
+def _parent_id(message: dict) -> str | None:
+    return _info(message).get("parentID")
+
+
+def _ordered_messages(messages: list[dict]) -> list[dict]:
+    # Kilo's own importer orders by ascending message id, which is transcript
+    # order for cloud exports (the export lists ingest order).
+    return sorted(messages, key=_message_id)
+
+
+def _owner_user(message: dict, by_id: dict[str, dict]) -> str | None:
+    """Return the user message that owns this assistant message, if linked."""
+    current = _parent_id(message)
+    seen: set[str] = set()
+    while current and current not in seen:
+        seen.add(current)
+        parent = by_id.get(current)
+        if not parent:
+            return None
+        if _info(parent).get("role") == "user":
+            return current
+        current = _parent_id(parent)
+    return None
+
+
+def _select_active_messages(messages: list[dict]) -> tuple[list[dict], dict]:
+    """Follow the active Kilo branch while preserving classic linear exports.
+
+    Kilo normally stores every user turn as a root and links assistant steps to
+    their user message. That is linear, so all messages are kept. When a cloud
+    export does link user turns into a parent tree (forks/regenerations), pick
+    the branch whose newest descendant is latest and drop the alternatives.
+    """
+    ordered = _ordered_messages(messages)
+    by_id = {_message_id(message): message for message in ordered}
+    users = [message for message in ordered if _info(message).get("role") == "user"]
+    user_ids = {_message_id(message) for message in users}
+    index = {_message_id(message): position for position, message in enumerate(ordered)}
+
+    owner: dict[str, str] = {}
+    for message in ordered:
+        if _info(message).get("role") != "assistant":
+            continue
+        user_id = _owner_user(message, by_id)
+        if user_id:
+            owner[_message_id(message)] = user_id
+
+    # Defensive fallback for exports with unlinked assistant messages: attach
+    # them to the closest preceding user turn rather than losing their output.
+    for message in ordered:
+        message_id = _message_id(message)
+        if _info(message).get("role") != "assistant" or message_id in owner:
+            continue
+        position = index[message_id]
+        preceding = [
+            user for user in users if index[_message_id(user)] < position
+        ]
+        if preceding:
+            owner[message_id] = _message_id(preceding[-1])
+
+    turn_parent: dict[str, str] = {}
+    for user in users:
+        user_id = _message_id(user)
+        parent_id = _parent_id(user)
+        if not parent_id:
+            continue
+        if parent_id in user_ids:
+            turn_parent[user_id] = parent_id
+        elif parent_id in owner:
+            turn_parent[user_id] = owner[parent_id]
+
+    if not turn_parent:
+        return ordered, {"branches": 0, "branchTurnsDropped": 0}
+
+    children: dict[str, list[dict]] = {}
+    roots: list[dict] = []
+    for user in users:
+        parent = turn_parent.get(_message_id(user))
+        if parent:
+            children.setdefault(parent, []).append(user)
+        else:
+            roots.append(user)
+
+    assistants_by_owner: dict[str, list[str]] = {}
+    for message_id, user_id in owner.items():
+        assistants_by_owner.setdefault(user_id, []).append(message_id)
+
+    latest: dict[str, int] = {}
+
+    def subtree_latest(user: dict) -> int:
+        user_id = _message_id(user)
+        if user_id not in latest:
+            best = index[user_id]
+            for assistant_id in assistants_by_owner.get(user_id, []):
+                best = max(best, index[assistant_id])
+            for child in children.get(user_id, []):
+                best = max(best, subtree_latest(child))
+            latest[user_id] = best
+        return latest[user_id]
+
+    active: set[str] = set()
+
+    def include_branch(user: dict) -> None:
+        user_id = _message_id(user)
+        active.add(user_id)
+        candidates = children.get(user_id, [])
+        if candidates:
+            include_branch(max(candidates, key=subtree_latest))
+
+    for root in roots:
+        include_branch(root)
+
+    selected = []
+    for message in ordered:
+        role = _info(message).get("role")
+        message_id = _message_id(message)
+        if role == "user" and message_id in active:
+            selected.append(message)
+        elif role == "assistant" and owner.get(message_id) in active:
+            selected.append(message)
+
+    return selected, {
+        "branches": len(turn_parent),
+        "branchTurnsDropped": len(users) - len(active),
+    }
+
+
+def _compaction_part(message: dict) -> dict | None:
+    for part in message.get("parts") or []:
+        if part.get("type") == "compaction":
+            return part
+    return None
+
+
+def _compaction_summary(
+    compaction: dict, messages: list[dict]
+) -> dict | None:
+    """Find the assistant message that carries Kilo's compaction summary."""
+    compaction_id = _message_id(compaction)
+    candidates = [
+        message
+        for message in messages
+        if _info(message).get("role") == "assistant"
+        and _parent_id(message) == compaction_id
+        and _info(message).get("summary")
+    ]
+    return max(candidates, key=_message_id) if candidates else None
+
+
 def _tool_result(part: dict, call: dict, timestamp: int) -> dict:
     state = part.get("state") or {}
     completed = state.get("status") == "completed"
@@ -241,14 +403,83 @@ def convert_export(export: dict, cwd: str, kilo_session_id: str) -> tuple[list[d
         )
         parent = "kilo-title"
 
-    # Kilo's own importer orders by ascending message/part id, which is time
-    # order for cloud exports (the export lists ingest order, not transcript
-    # order). Reuse that rule for compatibility.
-    for message in sorted(messages, key=lambda m: (m.get("info") or {}).get("id", "")):
-        meta = message.get("info") or {}
+    # Follow the active branch when the export links user turns into a tree.
+    # Classic Kilo exports keep every user turn at the root and are unchanged.
+    selected_messages, branch_stats = _select_active_messages(messages)
+    for key, value in branch_stats.items():
+        stats[key] = value
+
+    # Map a Kilo message id to the first Pi entry we emit for it. Compaction
+    # summaries point at the retained tail with firstKeptEntryId.
+    message_entry_ids: dict[str, str] = {}
+    summary_by_compaction: dict[str, dict] = {}
+    consumed_summaries: set[str] = set()
+    for message in selected_messages:
+        if _info(message).get("role") != "user" or not _compaction_part(message):
+            continue
+        summary = _compaction_summary(message, selected_messages)
+        if summary:
+            summary_by_compaction[_message_id(message)] = summary
+            consumed_summaries.add(_message_id(summary))
+
+    last_tokens_before = 0
+    for message in selected_messages:
+        meta = _info(message)
         role = meta.get("role")
+        message_id = _message_id(message)
         timestamp = (meta.get("time") or {}).get("created")
         parts = sorted(message.get("parts") or [], key=lambda p: p.get("id", ""))
+
+        if message_id in consumed_summaries:
+            # The assistant summary is represented by Pi's compaction entry.
+            stats["skipped-compaction-summary"] += 1
+            continue
+
+        compaction = _compaction_part(message) if role == "user" else None
+        if compaction:
+            summary = summary_by_compaction.get(message_id)
+            summary_parts = sorted(
+                (summary or {}).get("parts") or [], key=lambda p: p.get("id", "")
+            )
+            summary_text = "\n\n".join(
+                part.get("text") or ""
+                for part in summary_parts
+                if part.get("type") == "text" and part.get("text")
+            )
+            if not summary_text:
+                summary_text = (
+                    "Kilo compaction summary was unavailable "
+                    f"(source compaction {meta.get('id')})."
+                )
+            entry_id = f"kilo-compaction-{message_id}"
+            tail_id = compaction.get("tail_start_id")
+            first_kept = message_entry_ids.get(tail_id) if tail_id else None
+            if tail_id and not first_kept:
+                stats["compaction-tail-missing"] += 1
+            entry = {
+                "type": "compaction",
+                "id": entry_id,
+                "parentId": parent,
+                "timestamp": _iso(timestamp),
+                "summary": summary_text,
+                "firstKeptEntryId": first_kept or entry_id,
+                "tokensBefore": last_tokens_before,
+                "details": {
+                    "source": "kilo",
+                    "compactionPartId": compaction.get("id"),
+                    "auto": compaction.get("auto"),
+                    "overflow": compaction.get("overflow"),
+                    "tailStartId": tail_id,
+                },
+            }
+            if summary:
+                entry["usage"] = _usage(summary_parts)
+            entries.append(entry)
+            parent = entry_id
+            message_entry_ids[message_id] = entry_id
+            stats["compaction"] += 1
+            continue
+
         if role == "user":
             texts: list[str] = []
             images: list[dict] = []
@@ -276,7 +507,7 @@ def convert_export(export: dict, cwd: str, kilo_session_id: str) -> tuple[list[d
                 content = [
                     {"type": "text", "text": text} for text in texts if text
                 ] + images
-            entry_id = f"kilo-{meta.get('id')}"
+            entry_id = f"kilo-{message_id}"
             entries.append(
                 {
                     "type": "message",
@@ -291,6 +522,7 @@ def convert_export(export: dict, cwd: str, kilo_session_id: str) -> tuple[list[d
                 }
             )
             parent = entry_id
+            message_entry_ids[message_id] = entry_id
             stats["user"] += 1
             continue
 
@@ -325,14 +557,16 @@ def convert_export(export: dict, cwd: str, kilo_session_id: str) -> tuple[list[d
                 results.append(_tool_result(part, call, result_time))
                 stats["tool"] += 1
             else:
-                # step-start/step-finish/patch/compaction and future parts
+                # step-start/step-finish/patch and future parts
                 stats[f"skipped-{kind}"] += 1
 
         if not content:
             continue
 
+        usage = _usage(parts)
+        last_tokens_before = usage.get("totalTokens") or last_tokens_before
         model = meta.get("modelID") or (info.get("model") or {}).get("id") or "imported"
-        entry_id = f"kilo-{meta.get('id')}"
+        entry_id = f"kilo-{message_id}"
         entries.append(
             {
                 "type": "message",
@@ -345,17 +579,18 @@ def convert_export(export: dict, cwd: str, kilo_session_id: str) -> tuple[list[d
                     "api": "openai-completions",
                     "provider": meta.get("providerID") or "kilo",
                     "model": model,
-                    "usage": _usage(parts),
+                    "usage": usage,
                     "stopReason": _stop_reason(meta, content),
                     "timestamp": timestamp,
                 },
             }
         )
         parent = entry_id
+        message_entry_ids[message_id] = entry_id
         stats["assistant"] += 1
 
         for index, result in enumerate(results):
-            result_id = f"kilo-{meta.get('id')}-result-{index}"
+            result_id = f"kilo-{message_id}-result-{index}"
             entries.append(
                 {
                     "type": "message",
@@ -517,9 +752,16 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "Imported     : "
         + ", ".join(
-            f"{stats.get(k, 0)} {k}" for k in ("user", "assistant", "tool", "toolResult")
+            f"{stats.get(k, 0)} {k}"
+            for k in ("user", "assistant", "tool", "toolResult", "compaction")
         )
     )
+    if stats.get("branchTurnsDropped"):
+        print(
+            "Branches     : "
+            f"{stats.get('branches', 0)} linked turn(s), "
+            f"kept the newest path and dropped {stats['branchTurnsDropped']} turn(s)"
+        )
     skipped = {k: v for k, v in stats.items() if str(k).startswith("skipped-")}
     if skipped:
         print("Skipped parts: " + ", ".join(f"{k[8:]}={v}" for k, v in sorted(skipped.items())))

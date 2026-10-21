@@ -162,6 +162,119 @@ class ConvertTest(unittest.TestCase):
         )
         self.assertEqual(stats["skipped-step-start"], 1)
 
+    def test_classic_root_user_turns_stay_in_sequence(self):
+        export = sample_export()
+        export["messages"] = [
+            message("msg_1", "user", [part("u1", "text", text="one")]),
+            message("msg_2", "assistant", [part("a1", "text", text="first")]),
+            message("msg_3", "user", [part("u2", "text", text="two")]),
+            message("msg_4", "assistant", [part("a2", "text", text="second")]),
+        ]
+        entries, stats = ki.convert_export(export, "/work/project", "ses_test")
+        messages = [e for e in entries if e["type"] == "message"]
+        self.assertEqual(
+            [m["message"].get("content") for m in messages],
+            ["one", [{"type": "text", "text": "first"}], "two",
+             [{"type": "text", "text": "second"}]],
+        )
+        self.assertEqual(stats["branchTurnsDropped"], 0)
+
+    def test_linked_user_turns_follow_newest_branch(self):
+        export = sample_export()
+        export["messages"] = [
+            message("msg_1", "user", [part("u1", "text", text="root")]),
+            message("msg_2", "assistant", [part("a1", "text", text="root reply")], parentID="msg_1"),
+            message("msg_3", "user", [part("u2", "text", text="old branch")],
+                    parentID="msg_2"),
+            message("msg_4", "assistant", [part("a2", "text", text="old reply")],
+                    parentID="msg_3"),
+            message("msg_5", "user", [part("u3", "text", text="new branch")],
+                    parentID="msg_2"),
+            message("msg_6", "assistant", [part("a3", "text", text="new reply")],
+                    parentID="msg_5"),
+        ]
+        entries, stats = ki.convert_export(export, "/work/project", "ses_test")
+        messages = [e for e in entries if e["type"] == "message"]
+        texts = [m["message"]["content"] for m in messages]
+        self.assertEqual(
+            texts,
+            [
+                "root",
+                [{"type": "text", "text": "root reply"}],
+                "new branch",
+                [{"type": "text", "text": "new reply"}],
+            ],
+        )
+        self.assertEqual(stats["branches"], 2)
+        self.assertEqual(stats["branchTurnsDropped"], 1)
+
+    def test_compaction_becomes_pi_compaction_entry(self):
+        export = sample_export()
+        export["messages"] = [
+            message("msg_1", "user", [part("u1", "text", text="early")]),
+            message(
+                "msg_2",
+                "assistant",
+                [
+                    part("a1", "text", text="early reply"),
+                    part("f1", "step-finish", tokens={"input": 10, "output": 2, "total": 12}),
+                ],
+            ),
+            message(
+                "msg_3",
+                "user",
+                [part("c1", "compaction", auto=True, tail_start_id="msg_1")],
+            ),
+            message(
+                "msg_4",
+                "assistant",
+                [part("s1", "text", text="Kilo summary of early work.")],
+                parentID="msg_3",
+                summary=True,
+            ),
+            message("msg_5", "user", [part("u2", "text", text="continue")]),
+            message("msg_6", "assistant", [part("a2", "text", text="done")]),
+        ]
+        entries, stats = ki.convert_export(export, "/work/project", "ses_test")
+        compactions = [e for e in entries if e["type"] == "compaction"]
+        self.assertEqual(len(compactions), 1)
+        compaction = compactions[0]
+        self.assertEqual(compaction["summary"], "Kilo summary of early work.")
+        self.assertEqual(compaction["firstKeptEntryId"], "kilo-msg_1")
+        self.assertEqual(compaction["tokensBefore"], 12)
+        self.assertEqual(compaction["details"]["tailStartId"], "msg_1")
+        self.assertEqual(stats["compaction"], 1)
+        summary_texts = [
+            c.get("text")
+            for e in entries
+            if e["type"] == "message" and e["message"]["role"] == "assistant"
+            for c in e["message"]["content"]
+        ]
+        self.assertNotIn("Kilo summary of early work.", summary_texts)
+        self.assertEqual(stats["skipped-compaction-summary"], 1)
+
+    def test_compaction_without_tail_retains_nothing(self):
+        export = sample_export()
+        export["messages"] = [
+            message("msg_1", "user", [part("u1", "text", text="early")]),
+            message(
+                "msg_2",
+                "user",
+                [part("c1", "compaction", auto=True)],
+            ),
+            message(
+                "msg_3",
+                "assistant",
+                [part("s1", "text", text="summary")],
+                parentID="msg_2",
+                summary=True,
+            ),
+            message("msg_4", "assistant", [part("a1", "text", text="done")]),
+        ]
+        entries, _ = ki.convert_export(export, "/work/project", "ses_test")
+        compaction = [e for e in entries if e["type"] == "compaction"][0]
+        self.assertEqual(compaction["firstKeptEntryId"], compaction["id"])
+
 
 class PlacementTest(unittest.TestCase):
     def test_export_url(self):

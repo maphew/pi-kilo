@@ -8,6 +8,9 @@
 
 # Python bytecode (prototype tooling)
 __pycache__/
+prototype/*.egg-info/
+prototype/build/
+prototype/dist/
 
 # BEGIN swamp managed section - DO NOT EDIT
 
