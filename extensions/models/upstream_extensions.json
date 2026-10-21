@@ -1,7 +1,7 @@
 {
   "@maphew/bd": {
-    "version": "2026.10.15.2",
-    "pulledAt": "2026-10-16T21:51:31.243Z",
+    "version": "2026.10.16.1",
+    "pulledAt": "2026-10-21T19:33:59.796Z",
     "files": [
       ".swamp/bundles/c2067354/src/bd_project.js",
       ".swamp/pulled-extensions/@maphew/bd/files/LICENSE",
@@ -9,8 +9,8 @@
       ".swamp/pulled-extensions/@maphew/bd/manifest.yaml",
       ".swamp/pulled-extensions/@maphew/bd/models/src/bd_project.ts"
     ],
-    "checksum": "47e145bb206de146ec0129c6b78e4be4a6c84a52131ccee3f323130c39dca907",
-    "filesChecksum": "95fd66a6e415b61574caea11f37eb704604929d47722611a77f273d800c286a4",
+    "checksum": "d448949e9d4dacb1dabe91b342fec96fc2098189828a3d0a75e7717457265cfd",
+    "filesChecksum": "fc3972d8e4765d077f1f9a04e4233031a0d6cd73575a1109ab3364ac5d218efa",
     "serverUrl": "https://swamp-club.com",
     "publishedChannel": "stable"
   }
