@@ -67,3 +67,9 @@ DONE-FULL: ...
 - Cloud Agent path (hosted-only, OCVSAL).
 - Turn-boundary handoff Kilo->Pi->Kilo (history rebuild, not state migration).
 - Active-turn migration: out of scope.
+
+## See also
+
+- [`KiloImport.md`](KiloImport.md) — continue a Kilo Cloud session in Pi
+  (`prototype/pi-kilo --session ses_... --cloud-fork`): history import and
+  local continuation, with its own evidence and honest boundaries.

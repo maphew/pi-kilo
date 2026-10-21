@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Continue a Kilo cloud session in Pi.
+#
+#   pi-kilo ses_...                                   # import + exec pi
+#   pi-kilo --session ses_... --cloud-fork            # Kilo-compatible spelling
+#   pi-kilo ses_... --import-only --out /tmp/x.jsonl  # write the Pi session only
+#
+# Arguments after `--` are passed to `pi --session <file>`.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$here/kilo_import.py" "$@"

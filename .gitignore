@@ -6,6 +6,9 @@
 .beads/proxieddb/
 *.gate.lock*
 
+# Python bytecode (prototype tooling)
+__pycache__/
+
 # BEGIN swamp managed section - DO NOT EDIT
 
 # Runtime data (not needed in version control)
