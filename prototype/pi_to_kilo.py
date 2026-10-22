@@ -176,6 +176,8 @@ def discover_sessions() -> list[dict]:
                 "mtime": path.stat().st_mtime,
             }
         )
+    # Most recently written first, so --limit means "the last N sessions".
+    found.sort(key=lambda item: (-item["mtime"], str(item["path"])))
     return found
 
 
@@ -273,6 +275,7 @@ def _tool_part(
     *,
     session_id: str,
     message_id: str,
+    stable_prefix: str,
     timestamp: int,
     entry_id: str,
     index: int,
@@ -284,7 +287,9 @@ def _tool_part(
         args = {"value": args}
     tool_name = call.get("name") or "unknown"
     call_id = call.get("id") or f"{entry_id}-call-{index}"
-    part_id = ids.next(KILO_PART_PREFIX, timestamp, f"{entry_id}:tool:{index}")
+    part_id = ids.next(
+        KILO_PART_PREFIX, timestamp, f"{stable_prefix}:{entry_id}:tool:{index}"
+    )
     start = timestamp
     if result is None:
         state = {
@@ -333,6 +338,7 @@ def _image_part(
     *,
     session_id: str,
     message_id: str,
+    stable_prefix: str,
     timestamp: int,
     entry_id: str,
     index: int,
@@ -341,7 +347,9 @@ def _image_part(
     mime = block.get("mimeType") or "application/octet-stream"
     data = block.get("data") or ""
     return {
-        "id": ids.next(KILO_PART_PREFIX, timestamp, f"{entry_id}:image:{index}"),
+        "id": ids.next(
+            KILO_PART_PREFIX, timestamp, f"{stable_prefix}:{entry_id}:image:{index}"
+        ),
         "sessionID": session_id,
         "messageID": message_id,
         "type": "file",
@@ -405,6 +413,10 @@ def convert_session(
             }
         },
     }
+    # Part ids must be unique across the whole Kilo DB (part.id is a global
+    # primary key), and Pi clones/forks can share entry ids. Key them by the Pi
+    # session id as well as the entry id.
+    stable_prefix = pi_session_id
     messages: list[dict] = []
     tool_results = _tool_results(chain)
     consumed: set[str] = set()
@@ -449,7 +461,11 @@ def convert_session(
                 if block.get("type") == "text" and block.get("text"):
                     parts.append(
                         {
-                            "id": ids.next(KILO_PART_PREFIX, timestamp, f"{entry_id}:text:{index}"),
+                            "id": ids.next(
+                                KILO_PART_PREFIX,
+                                timestamp,
+                                f"{stable_prefix}:{entry_id}:text:{index}",
+                            ),
                             "sessionID": session_id,
                             "messageID": message_id,
                             "type": "text",
@@ -463,6 +479,7 @@ def convert_session(
                             ids,
                             session_id=session_id,
                             message_id=message_id,
+                            stable_prefix=stable_prefix,
                             timestamp=timestamp,
                             entry_id=entry_id,
                             index=index,
@@ -504,7 +521,11 @@ def convert_session(
             if block_type == "text" and block.get("text"):
                 parts.append(
                     {
-                        "id": ids.next(KILO_PART_PREFIX, timestamp, f"{entry_id}:text:{index}"),
+                        "id": ids.next(
+                            KILO_PART_PREFIX,
+                            timestamp,
+                            f"{stable_prefix}:{entry_id}:text:{index}",
+                        ),
                         "sessionID": session_id,
                         "messageID": message_id,
                         "type": "text",
@@ -515,7 +536,11 @@ def convert_session(
             elif block_type == "thinking" and block.get("thinking"):
                 parts.append(
                     {
-                        "id": ids.next(KILO_PART_PREFIX, timestamp, f"{entry_id}:thinking:{index}"),
+                        "id": ids.next(
+                            KILO_PART_PREFIX,
+                            timestamp,
+                            f"{stable_prefix}:{entry_id}:thinking:{index}",
+                        ),
                         "sessionID": session_id,
                         "messageID": message_id,
                         "type": "reasoning",
@@ -532,6 +557,7 @@ def convert_session(
                         ids,
                         session_id=session_id,
                         message_id=message_id,
+                        stable_prefix=stable_prefix,
                         timestamp=timestamp,
                         entry_id=entry_id,
                         index=index,
@@ -907,11 +933,34 @@ def cmd_import(args: argparse.Namespace) -> int:
     if not selected:
         print("No Pi sessions matched the filter.", file=sys.stderr)
         return 1
+    if args.limit:
+        selected = selected[: args.limit]
 
     kilo = None if args.dry_run else kilo_bin()
     version = "0.0.0" if args.dry_run else kilo_version(kilo or "")
     db_path = Path(args.db).expanduser() if args.db else kilo_db_path()
-    out_dir = Path(args.out).expanduser() if args.out else Path(tempfile.mkdtemp(prefix="pi-kilo-"))
+    # Exports are scratch files for `kilo import`. Keep them only when the
+    # caller asked for a directory; otherwise clean up when the run finishes.
+    temp_dir = tempfile.TemporaryDirectory(prefix="pi-kilo-") if not args.out else None
+    out_root = Path(temp_dir.name) if temp_dir else Path(args.out).expanduser()
+    try:
+        return _import_selected(
+            args, selected, kilo, version, db_path, out_root, bool(temp_dir)
+        )
+    finally:
+        if temp_dir:
+            temp_dir.cleanup()
+
+
+def _import_selected(
+    args: argparse.Namespace,
+    selected: list[dict],
+    kilo: str | None,
+    version: str,
+    db_path: Path,
+    out_dir: Path,
+    scratch: bool,
+) -> int:
     ok = 0
     skipped = 0
     failed = 0
@@ -965,8 +1014,9 @@ def cmd_import(args: argparse.Namespace) -> int:
 
         export_path = write_export(export, out_dir, session_id)
         if args.dry_run:
+            kept = "" if scratch else f" -> {export_path}"
             print(
-                f"DRY  {label} -> {export_path} "
+                f"DRY  {label}{kept} "
                 f"({stats.get('user', 0)} user, {stats.get('assistant', 0)} assistant, "
                 f"{stats.get('tool', 0)} tool)"
             )
@@ -1061,6 +1111,7 @@ def main(argv: list[str] | None = None) -> int:
     imp.add_argument("--all", action="store_true", help="import every discovered session (default)")
     imp.add_argument("--session", help="Pi session id, id prefix, or path")
     imp.add_argument("--cwd", help="only sessions recorded for this project directory")
+    imp.add_argument("--limit", type=int, help="only the N most recently modified sessions")
     imp.add_argument("--replace", action="store_true", help="re-import an existing local session (refused if published)")
     imp.add_argument("--dry-run", action="store_true", help="write export JSON but do not run kilo import")
     imp.add_argument("--out", help="directory for generated Kilo export JSON")

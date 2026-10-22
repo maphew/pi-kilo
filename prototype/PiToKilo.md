@@ -34,6 +34,9 @@ attached. See [Honest boundaries](#honest-boundaries).
 # Convert and import every Pi session into Kilo (local only)
 pi-kilo import --all
 
+# The 10 most recently modified sessions only
+pi-kilo import --limit 10
+
 # One session, by id, id prefix, or file path
 pi-kilo import --session 164b1be580000tubDUz9Q2l9sX
 pi-kilo import --session ~/.pi/agent/sessions/--home-mhw-dev--/2026-10-22T15-00-00_abc.jsonl
@@ -44,6 +47,10 @@ pi-kilo import --cwd ~/dev/project
 # Convert without touching Kilo's DB
 pi-kilo import --all --dry-run --out /tmp/kilo-exports
 ```
+
+Sessions are ordered newest-first by file mtime, so `--limit N` means the last N
+sessions you worked on. Export JSON is written to a temporary directory and
+deleted when the run finishes unless `--out` names a directory to keep.
 
 Each converted session gets a deterministic `ses_...` id derived from the Pi
 session UUID, so a second run skips what is already imported. `--replace`
@@ -133,8 +140,8 @@ the Kilo export shape and are not migrated.
 
 ## Verification
 
-Offline tests cover conversion, active-branch selection, tool pairing, ids,
-discovery, and publish chunking:
+Offline tests cover conversion, active-branch selection, tool pairing, ids
+(including clones that reuse Pi entry ids), discovery, and publish chunking:
 
 ```bash
 python3 -m unittest prototype/test_pi_to_kilo.py
@@ -142,10 +149,12 @@ python3 -m unittest prototype/test_pi_to_kilo.py
 
 Observed on this workstation (2026-10-22):
 
+- `pi-kilo import --limit 10` imported the 10 most recent Pi sessions, all with
+  `share_url` NULL and no `session_share` entry; scratch exports were removed.
 - `pi-kilo import --all --dry-run` converted 39 Pi sessions in 4 project
   directories with 0 failures.
 - A 324-message session (321 assistant, 349 tool calls) imported as 324 Kilo
   messages and 621 parts, `share_url` NULL, and `publish` planned 948 items in
   8 chunks (1.2 MB) without posting.
-- A synthetic session imported with `KILO_DISABLE_SESSION_INGEST=1`, appeared in
-  the local DB with its messages/parts, and was skipped on a second run.
+- Two cloned Pi sessions that reuse entry ids import with disjoint Kilo part ids
+  (regression test: Kilo's `part.id` is a global primary key).

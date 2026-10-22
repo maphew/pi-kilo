@@ -214,6 +214,26 @@ class ConvertTests(unittest.TestCase):
         image = export["messages"][0]["parts"][1]
         self.assertEqual(image["url"], "data:image/png;base64,AAAA")
 
+    def test_part_ids_are_unique_across_cloned_sessions(self):
+        # Pi clones/forks can reuse entry ids. Kilo's part.id is a global primary
+        # key, so ids must differ across sessions even for identical entries.
+        entries = [
+            message("e1", None, 1000, "user", "hello"),
+            message("e2", "e1", 2000, "assistant", [{"type": "text", "text": "hi"}]),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for index, session_id in enumerate(("clone-a", "clone-b")):
+                path = Path(tmp) / f"{index}.jsonl"
+                write_session(path, "/tmp/project", entries, session_id=session_id)
+                paths.append(path)
+            first, _ = p2k.convert_session(paths[0])
+            second, _ = p2k.convert_session(paths[1])
+        first_parts = {part["id"] for m in first["messages"] for part in m["parts"]}
+        second_parts = {part["id"] for m in second["messages"] for part in m["parts"]}
+        self.assertTrue(first_parts)
+        self.assertEqual(first_parts & second_parts, set())
+
     def test_ids_are_deterministic(self):
         entries = [
             message("e1", None, 1000, "user", "hello"),

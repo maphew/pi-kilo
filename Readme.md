@@ -99,6 +99,9 @@ The reverse direction is local-first, mirroring Kilo’s own “local until `/re
 # Convert every Pi session and import it into Kilo's local store (no network)
 pi-kilo import --all
 
+# Just the 10 most recently modified sessions
+pi-kilo import --limit 10
+
 # One project, one session, or a dry run that only writes export JSON
 pi-kilo import --cwd ~/dev/project
 pi-kilo import --session 164b1be58
@@ -109,6 +112,9 @@ pi-kilo publish --list
 pi-kilo publish ses_...            # prints the plan, uploads nothing
 pi-kilo publish ses_... --post     # uploads history
 ```
+
+Import exports are scratch files: without `--out` they are written to a temporary
+directory and removed when the run finishes.
 
 Imports run `kilo import` with `KILO_DISABLE_SESSION_INGEST=1`, so they cannot create a Cloud session or share. The result appears in Kilo’s `/resume` for that project. Publishing uploads history only; it does not attach Pi as a live executor. See [`prototype/PiToKilo.md`](prototype/PiToKilo.md).
 
