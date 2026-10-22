@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Continue a Kilo cloud session in Pi.
+# Move sessions between Kilo and Pi.
 #
-#   pi-kilo ses_...                                   # import + exec pi
+#   pi-kilo ses_...                                   # Kilo -> Pi: import + exec pi
 #   pi-kilo --session ses_... --cloud-fork            # Kilo-compatible spelling
 #   pi-kilo ses_... --import-only --out /tmp/x.jsonl  # write the Pi session only
+#   pi-kilo import --all                              # Pi -> Kilo: local-only import
+#   pi-kilo publish --list                            # Pi -> Kilo: opt-in history publish
 #
 # Arguments after `--` are passed to `pi --session <file>`.
 set -euo pipefail

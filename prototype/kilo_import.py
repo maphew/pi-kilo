@@ -675,6 +675,13 @@ def load_export(args: argparse.Namespace) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    # Reverse direction (Pi -> Kilo) lives in pi_to_kilo.py. Dispatch only on
+    # explicit subcommands so `pi-kilo ses_...` keeps working unchanged.
+    if raw and raw[0] in {"import", "publish"}:
+        from pi_to_kilo import main as reverse_main
+
+        return reverse_main(raw)
     parser = argparse.ArgumentParser(
         description="Import a Kilo cloud session into Pi and optionally continue it"
     )

@@ -15,4 +15,4 @@ dependencies = []
 pi-kilo = "kilo_import:main"
 
 [tool.setuptools]
-py-modules = ["kilo_import"]
+py-modules = ["kilo_import", "pi_to_kilo"]

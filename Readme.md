@@ -13,7 +13,7 @@ _A cloud session on left, resumed in pi-kilo on the right_
 
 This is a research and prototype repository, not a packaged product. The two runnable pieces are:
 
-- **`pi-kilo`** — imports a Kilo Cloud session into Pi’s session format and continues it locally with Pi. Today this is one-way history import plus local continuation, not live integration. See [`prototype/KiloImport.md`](prototype/KiloImport.md) for the conversion model and honest boundaries.
+- **`pi-kilo`** — moves conversations between the two runtimes. Kilo → Pi: imports a Kilo Cloud session into Pi’s session format and continues it locally. Pi → Kilo: imports Pi sessions into Kilo’s local store, with an explicit opt-in publish. See [`prototype/KiloImport.md`](prototype/KiloImport.md) and [`prototype/PiToKilo.md`](prototype/PiToKilo.md).
 - **`prototype/pi_adapter.py`** — a local harness that routes a Kilo-style message to Pi over Pi’s RPC interface and proves execution ownership, message deduplication, permission enforcement, and resume behavior. See [`prototype/Demo.md`](prototype/Demo.md).
 
 Phase 0 research and evidence live in [`reports/research/`](reports/research/). The full brief is in [`Plan.md`](Plan.md).
@@ -91,6 +91,27 @@ By default the converted session is written to Pi’s normal session directory f
 
 The imported Pi session is a new, independent session. New Pi turns are not visible to Kilo, and Pi cannot resume Kilo’s private runtime state. Re-importing creates another Pi session rather than incrementally syncing. See [`prototype/KiloImport.md`](prototype/KiloImport.md) for the full conversion table, branch/compaction behavior, and limits.
 
+### Bring Pi sessions into Kilo
+
+The reverse direction is local-first, mirroring Kilo’s own “local until `/remote` or `/share`” behavior:
+
+```bash
+# Convert every Pi session and import it into Kilo's local store (no network)
+pi-kilo import --all
+
+# One project, one session, or a dry run that only writes export JSON
+pi-kilo import --cwd ~/dev/project
+pi-kilo import --session 164b1be58
+pi-kilo import --all --dry-run --out /tmp/kilo-exports
+
+# Opt-in: upload history for one imported session to Kilo Cloud
+pi-kilo publish --list
+pi-kilo publish ses_...            # prints the plan, uploads nothing
+pi-kilo publish ses_... --post     # uploads history
+```
+
+Imports run `kilo import` with `KILO_DISABLE_SESSION_INGEST=1`, so they cannot create a Cloud session or share. The result appears in Kilo’s `/resume` for that project. Publishing uploads history only; it does not attach Pi as a live executor. See [`prototype/PiToKilo.md`](prototype/PiToKilo.md).
+
 ### Run the Pi adapter harness
 
 Configure a Pi model provider first (the demo was run with the `kilo` provider), then run from the repository root:
@@ -113,19 +134,21 @@ The harness writes managed sessions under `/tmp/pi-kilo-hip/sessions/` and curre
 git clone https://github.com/maphew/pi-kilo.git
 cd pi-kilo
 python3 -m unittest prototype/test_kilo_import.py
+python3 -m unittest prototype/test_pi_to_kilo.py
 ```
 
-There is no build step, `package.json`, or JavaScript dependency tree. The importer and adapter are plain Python; the only Pi extension is [`prototype/kilo-gate.ts`](prototype/kilo-gate.ts), which Pi loads directly for the full adapter demo.
+There is no build step, `package.json`, or JavaScript dependency tree. Both converters and the adapter are plain Python; the only Pi extension is [`prototype/kilo-gate.ts`](prototype/kilo-gate.ts), which Pi loads directly for the full adapter demo.
 
 ### Tests
 
-The converter tests need no network, credentials, or Pi installation:
+The converter tests (both directions) need no network, credentials, or Pi installation:
 
 ```bash
 python3 -m unittest prototype/test_kilo_import.py
+python3 -m unittest prototype/test_pi_to_kilo.py
 ```
 
-They cover classic root turns, linked branch selection, compaction with and without a retained tail, tool/usage mapping, and session placement.
+They cover classic root turns, linked branch selection, compaction with and without a retained tail, tool/usage mapping, active-branch Pi conversion, deterministic ids, publish payloads, and session placement.
 
 To verify an imported session with Pi without calling a model:
 
@@ -141,11 +164,14 @@ pi --export /tmp/session.jsonl /tmp/session.html
 | Path | Contents |
 | --- | --- |
 | `prototype/kilo_import.py` | Kilo Cloud export fetch and Kilo-to-Pi session conversion. |
-| `prototype/pi-kilo` | Checkout wrapper for `kilo_import.py`. |
+| `prototype/pi_to_kilo.py` | Pi-to-Kilo conversion, local import, and opt-in history publish. |
+| `prototype/pi-kilo` | Checkout wrapper for `kilo_import.py` / `pi_to_kilo.py`. |
 | `prototype/pi_adapter.py` | Pi RPC harness for ownership, dedupe, permission, and resume probes. |
 | `prototype/kilo-gate.ts` | Pi extension used by the adapter demo to gate tool calls. |
-| `prototype/test_kilo_import.py` | Offline unit tests for the converter. |
-| `prototype/KiloImport.md` | Importer usage, mapping details, evidence, and boundaries. |
+| `prototype/test_kilo_import.py` | Offline unit tests for the Kilo-to-Pi converter. |
+| `prototype/test_pi_to_kilo.py` | Offline unit tests for the Pi-to-Kilo converter and publish payload. |
+| `prototype/KiloImport.md` | Kilo-to-Pi usage, mapping details, evidence, and boundaries. |
+| `prototype/PiToKilo.md` | Pi-to-Kilo local import, publish, mapping details, and boundaries. |
 | `prototype/Demo.md` | Adapter demo script and expected output. |
 | `reports/research/` | Phase 0 workstream reports, reviews, and the evidence ledger. |
 | `drafts/` | Draft upstream issues for Kilo. |
@@ -156,6 +182,9 @@ pi --export /tmp/session.jsonl /tmp/session.html
 | Variable | Used by | Purpose |
 | --- | --- | --- |
 | `PI_BIN` | `pi-kilo` | Path to `pi` when it is not on `PATH`. |
+| `KILO_BIN` | `pi-kilo import` | Path to `kilo` when it is not on `PATH`. |
+| `PI_SESSIONS_DIR` | `pi-kilo import` | Override Pi’s session root (default: `~/.pi/agent/sessions`). |
+| `KILO_DB` | `pi-kilo import` / `publish` | Override Kilo’s SQLite path (default: `~/.local/share/kilo/kilo.db`). |
 | `KILO_AUTH_FILE` | `pi-kilo` | Override the Kilo `auth.json` location. |
 | `KILO_SESSION_INGEST_URL` | `pi-kilo` | Override the Kilo session ingest base URL. |
 | `PI_GATE_DENY` | `kilo-gate.ts` | Comma-separated tool-name fragments denied by default; defaults to `write,bash,edit`. |
