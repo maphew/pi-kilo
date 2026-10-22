@@ -26,7 +26,7 @@ Phase 0 research and evidence live in [`reports/research/`](reports/research/). 
 | Node.js | Pi runtime | Pi itself is a Node application. |
 | Kilo CLI | Cloud session import | Needed once for `kilo auth login`. |
 | `uv` or `pipx` | Installing the `pi-kilo` command | Optional; the checkout wrapper works without either. |
-| Kilo.ai account  | A Kilo Gateway subscription or enough credits to use https://app.kilo.ai/cloud/sessions |
+| Kilo.ai account  | https://app.kilo.ai/cloud/sessions | A Kilo Gateway subscription or enough credits to use Kilo.ai user features |
 
 Network access to `https://ingest.kilosessions.ai` is required when importing a session from Kilo Cloud.
 
