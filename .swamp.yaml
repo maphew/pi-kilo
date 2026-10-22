@@ -1,4 +1,4 @@
-swampVersion: 20261016.163909.0
+swampVersion: 20261022.143020.0
 initializedAt: "2026-10-16T17:13:19.142Z"
 repoId: c7ec1a98-7ecd-4924-9048-f1597535f9d3
 tools:
@@ -8,3 +8,4 @@ gitignoreManaged: true
 trustedCollectives:
   - swamp
   - maphew
+upgradedAt: "2026-10-22T15:03:35.379Z"
