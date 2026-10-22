@@ -6,6 +6,9 @@ The desired experience is for `app.kilo.ai` not caring which compatible runtime 
 
 This is runtime interoperability, not merely exporting a transcript or displaying a read-only copy of another agent’s session.
 
+_A cloud session on left, resumed in pi-kilo on the right_
+![A cloud session on left, resumed in pi-kilo on the right](assets/cloud-resume-in-pi.jpg)
+
 ## What is in this repository
 
 This is a research and prototype repository, not a packaged product. The two runnable pieces are:
